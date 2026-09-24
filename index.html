@@ -62,7 +62,10 @@ h1{margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em}
 .bump{margin:10px 0 0;padding:10px 12px;background:var(--signal);color:var(--signal-ink);border-radius:8px;font-weight:700}
 .cols,.set{display:grid;grid-template-columns:24px 1.3fr 1fr 1fr;gap:8px;align-items:center}
 .cols{margin:14px 0 4px;color:var(--muted);font-size:13px;text-align:center}
-.set{margin-bottom:8px}
+.grp{margin-bottom:8px}
+.grp.ss{border-left:3px solid var(--signal);padding-left:8px}
+.ptl{margin:6px 0 2px 32px;font-size:13px;font-weight:650;color:var(--muted)}
+.hist li .lb{margin:0 6px 0 0;font-weight:650}
 .set .n{color:var(--muted);font-weight:700;text-align:center}
 .set input{width:100%;min-width:0;height:50px;padding:0 4px;border:1.5px solid var(--line);border-radius:8px;background:var(--field);text-align:center;font-size:21px;font-weight:700;font-variant-numeric:tabular-nums;-moz-appearance:textfield}
 .set input::placeholder{color:var(--muted);opacity:.55;font-weight:600}
@@ -86,6 +89,8 @@ details{margin-top:28px;color:var(--muted);font-size:14px}
 summary{cursor:pointer;min-height:36px}
 .tools2{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .tools2 .ghost,.tools2 label.ghost{display:inline-flex;align-items:center}
+.note{margin:8px 0;line-height:1.4}
+.tools2 input[type=password]{flex:1;min-width:200px;min-height:44px;padding:0 12px;border:1.5px solid var(--line);border-radius:8px;background:var(--surface);font-size:16px}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:650;z-index:10}
 .toast[hidden]{display:none}
 </style>
@@ -103,7 +108,17 @@ summary{cursor:pointer;min-height:36px}
   <p class="hint">Arrastra el asa o usa las flechas. El orden se guarda solo.</p>
   <ol id="list"></ol>
   <details>
-    <summary>Copia de seguridad</summary>
+    <summary>Sincronización y copia de seguridad</summary>
+    <p class="note">Sincroniza tus datos entre móvil y ordenador con un Gist privado de tu cuenta de GitHub. Crea un token clásico en github.com/settings/tokens con solo el permiso <b>gist</b> y pégalo aquí en cada dispositivo.</p>
+    <div class="tools2">
+      <input id="tokenInput" type="password" autocomplete="off" placeholder="Token de GitHub (permiso gist)">
+      <button class="ghost" id="connectBtn" type="button">Conectar</button>
+    </div>
+    <div class="tools2">
+      <button class="ghost" id="syncBtn" type="button">Sincronizar ahora</button>
+      <button class="ghost" id="disconnectBtn" type="button">Desconectar</button>
+    </div>
+    <p class="note" id="syncStatus" role="status"></p>
     <div class="tools2">
       <button class="ghost" id="exportBtn" type="button">Exportar datos</button>
       <label class="ghost">Importar datos<input id="importFile" type="file" accept="application/json" hidden></label>
@@ -130,7 +145,7 @@ const SEED = [
   { name:'Pull', ex:[
     ['Jalón pecho','3','8','1-2'], ['Remo barra libre','2-3','6-8','1-2'],
     ['Pull-over','2','10-12','1-0'], ['Martillo mancuernas','2','8-10','1-2'],
-    ['Curl bayesiano','3','8-10','1-0'], ['Antebrazo','2','12-15','0'] ]},
+    ['Curl bayesiano','3','8-10','1-0'], ['Antebrazo','2','12-15','0',['Supino','Prono']] ]},
   { name:'Pierna B', ex:[
     ['Ext. cuádriceps','2-3','10-8','1-0'], ['Sentadilla Multi/Búlgara','2','6-8','1-2'],
     ['Peso Muerto mancuernas','3','8-10','1-0'], ['Curl Femoral','2','8-10','1-0'],
@@ -151,12 +166,12 @@ function buildSeed() {
   return SEED.map((d, di) => ({
     id: 'd' + (di + 1),
     name: d.name,
-    exercises: d.ex.map(([name, sets, reps, rir], ei) => {
+    exercises: d.ex.map(([name, sets, reps, rir, parts], ei) => {
       const [setsMin, setsMax] = range(sets);
       const [repMin, repMax] = range(reps);
       const r = range(rir);
       return { id:`d${di + 1}e${ei + 1}`, name, setsMin, setsMax, repMin, repMax,
-               rirMin: r ? r[0] : null, rirMax: r ? r[1] : null };
+               rirMin: r ? r[0] : null, rirMax: r ? r[1] : null, ...(parts ? { parts } : {}) };
     })
   }));
 }
@@ -169,9 +184,19 @@ let reorder = false;
 function load() {
   try {
     const s = JSON.parse(localStorage.getItem(KEY));
-    if (s && Array.isArray(s.days) && s.history) { s.ui = s.ui || { day:0 }; return s; }
+    if (s && Array.isArray(s.days) && s.history) {
+      s.ui = s.ui || { day:0 };
+      s.meta = s.meta || { orderT: 0 };
+      // Migración: el Remo Gironda tiene RIR objetivo 1-0
+      s.days.forEach(d => d.exercises.forEach(e => {
+        if (e.name === 'Remo Gironda' && e.rirMax == null) { e.rirMin = 0; e.rirMax = 1; }
+        // Antebrazo pasa a superserie supino + prono
+        if (e.name === 'Antebrazo' && !e.parts) e.parts = ['Supino', 'Prono'];
+      }));
+      return s;
+    }
   } catch (_) {}
-  return { days: buildSeed(), history: {}, ui: { day:0 } };
+  return { days: buildSeed(), history: {}, ui: { day:0 }, meta: { orderT: 0 } };
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); }
@@ -198,22 +223,29 @@ function toast(msg) {
 
 /* ---------- Lógica de progresión ---------- */
 const hist = id => state.history[id] || [];
-const todayEntry = id => hist(id).find(h => h.date === today());
-const prevEntry = id => hist(id).filter(h => h.date < today()).sort((a, b) => a.date.localeCompare(b.date)).pop();
-const completed = e => e.sets.filter(s => s.r != null);
+const todayEntry = id => hist(id).find(h => h.date === today() && !h.del);
+const prevEntry = id => hist(id).filter(h => h.date < today() && !h.del).sort((a, b) => a.date.localeCompare(b.date)).pop();
+// Un ejercicio puede tener 2 partes (superserie): 1ª = w/r/rir, 2ª = w2/r2/rir2
+const KEYS = [['w', 'r', 'rir'], ['w2', 'r2', 'rir2']];
+const isDone = s => s.r != null && (s.r2 === undefined || s.r2 != null);
+const completed = e => e.sets.filter(isDone);
 
 /* Regla "Subir Peso": en la sesión anterior, TODAS las series registradas llegaron
    al máximo del rango de repeticiones y respetaron el RIR objetivo (RIR real <= máximo
    del rango objetivo, es decir, sin quedarte más corto de esfuerzo del permitido).
-   Además debe haber al menos el mínimo de series del ejercicio. */
-function shouldIncrease(ex, entry) {
+   Además debe haber al menos el mínimo de series del ejercicio.
+   En una superserie se evalúa cada parte por separado y devuelve las que deben subir. */
+function partsUp(ex, entry) {
   const done = completed(entry);
-  if (done.length < ex.setsMin) return false;
-  return done.every(s =>
-    s.r >= ex.repMax &&
-    (ex.rirMax == null || (s.rir != null && s.rir <= ex.rirMax))
-  );
+  if (done.length < ex.setsMin) return [];
+  const res = [];
+  for (let k = 0; k < (ex.parts ? ex.parts.length : 1); k++) {
+    const [, r, rir] = KEYS[k];
+    if (done.every(s => s[r] >= ex.repMax && (ex.rirMax == null || (s[rir] != null && s[rir] <= ex.rirMax)))) res.push(k);
+  }
+  return res;
 }
+const shouldIncrease = (ex, entry) => partsUp(ex, entry).length > 0;
 
 /* ---------- Render ---------- */
 const day = () => state.days[state.ui.day];
@@ -231,13 +263,21 @@ function render() {
   updateMeta();
 }
 
-function rowHTML(i, w, r, rir, rPh, rirPh) {
-  return `<div class="set">
-    <span class="n">${i + 1}</span>
-    <input class="w" type="number" inputmode="decimal" step="0.5" min="0" placeholder="kg" aria-label="Peso serie ${i + 1}" value="${w ?? ''}">
-    <input class="r" type="number" inputmode="numeric" step="1" min="0" placeholder="${rPh ?? '–'}" aria-label="Repeticiones serie ${i + 1}" value="${r ?? ''}">
-    <input class="rir" type="number" inputmode="numeric" step="1" min="0" max="10" placeholder="${rirPh ?? '–'}" aria-label="RIR serie ${i + 1}" value="${rir ?? ''}">
-  </div>`;
+function setHTML(i, ex, c, p, wDef) {
+  const np = ex.parts ? ex.parts.length : 1;
+  let h = `<div class="grp${np > 1 ? ' ss' : ''}">`;
+  for (let k = 0; k < np; k++) {
+    const [wk, rk, ik] = KEYS[k];
+    const w = c ? c[wk] : (p && p[wk] != null ? p[wk] : (wDef ? wDef[k] : ''));
+    const lb = np > 1 ? ` (${esc(ex.parts[k])})` : '';
+    h += (np > 1 ? `<div class="ptl">${esc(ex.parts[k])}</div>` : '') + `<div class="set">
+      <span class="n">${k === 0 ? i + 1 : ''}</span>
+      <input class="w" type="number" inputmode="decimal" step="0.5" min="0" placeholder="kg" aria-label="Peso serie ${i + 1}${lb}" value="${w ?? ''}">
+      <input class="r" type="number" inputmode="numeric" step="1" min="0" placeholder="${(p && p[rk]) ?? '–'}" aria-label="Repeticiones serie ${i + 1}${lb}" value="${(c && c[rk]) ?? ''}">
+      <input class="rir" type="number" inputmode="numeric" step="1" min="0" max="10" placeholder="${(p && p[ik]) ?? '–'}" aria-label="RIR serie ${i + 1}${lb}" value="${(c && c[ik]) ?? ''}">
+    </div>`;
+  }
+  return h + '</div>';
 }
 
 function card(ex) {
@@ -246,21 +286,25 @@ function card(ex) {
   const flag = !!prev && shouldIncrease(ex, prev);
   const doneN = cur ? completed(cur).length : 0;
   const n = Math.max(ex.setsMax, cur ? cur.sets.length : 0);
-  const lastW = pd.length ? pd[pd.length - 1].w : null;
+  const up = prev ? partsUp(ex, prev) : [];
 
   let rows = '';
   for (let i = 0; i < n; i++) {
     const c = cur && cur.sets[i];
     const p = pd[i] || pd[pd.length - 1];
-    rows += rowHTML(i, c ? c.w : (pd[i] ? pd[i].w : lastW), c && c.r, c && c.rir, p && p.r, p && p.rir);
+    rows += setHTML(i, ex, c || null, p || null, null);
   }
 
   const rx = `${lab(ex.setsMin, ex.setsMax)}×${lab(ex.repMin, ex.repMax)}` +
-             (ex.rirMax != null ? `  ·  RIR ${lab(ex.rirMin, ex.rirMax)}` : '');
+             (ex.rirMax != null ? `  ·  RIR ${lab(ex.rirMin, ex.rirMax)}` : '') +
+             (ex.parts ? `  ·  Superserie ${ex.parts.map(x => x.toLowerCase()).join(' + ')}` : '');
 
   const history = prev
-    ? `<h2>A batir: sesión del ${fmtDate(prev.date)}</h2><ul>${pd.map(s =>
-        `<li>${fmt(s.w)} kg × ${s.r}${s.rir != null ? `<span>RIR ${s.rir}</span>` : ''}</li>`).join('')}</ul>`
+    ? `<h2>A batir: sesión del ${fmtDate(prev.date)}</h2><ul>${pd.map(s => '<li>' + (ex.parts || ['']).map((nm, k) => {
+        const [wk, rk, ik] = KEYS[k];
+        return (ex.parts ? `<span class="lb">${esc(nm)}</span>` : '') +
+          `${fmt(s[wk])} kg × ${s[rk]}${s[ik] != null ? `<span>RIR ${s[ik]}</span>` : ''}`;
+      }).join(' ') + '</li>').join('')}</ul>`
     : `<h2>Sesión anterior</h2><p>Primera vez: registra tu marca de partida.</p>`;
 
   return `<li class="ex${flag ? ' flag' : ''}${doneN >= ex.setsMin ? ' done' : ''}" data-id="${ex.id}">
@@ -278,7 +322,7 @@ function card(ex) {
     </div>
     <div class="panel">
       <div class="hist">${history}</div>
-      ${flag ? `<p class="bump">Llegaste a ${ex.repMax} reps en todas las series con el RIR objetivo. Hoy sube el peso.</p>` : ''}
+      ${flag ? `<p class="bump">Llegaste a ${ex.repMax} reps en todas las series con el RIR objetivo${ex.parts ? ` en ${up.map(k => ex.parts[k].toLowerCase()).join(' y ')}` : ''}. Hoy sube el peso.</p>` : ''}
       <div class="cols"><span></span><span>Peso (kg)</span><span>Reps</span><span>RIR</span></div>
       ${rows}
       <button class="add" type="button">+ Serie</button>
@@ -298,23 +342,29 @@ function updateMeta() {
 list.addEventListener('input', e => {
   const li = e.target.closest('.ex'); if (!li) return;
   const id = li.dataset.id;
-  const sets = [...li.querySelectorAll('.set')].map(r => ({
-    w: num(r.querySelector('.w').value),
-    r: num(r.querySelector('.r').value),
-    rir: num(r.querySelector('.rir').value)
-  }));
+  const sets = [...li.querySelectorAll('.grp')].map(g => {
+    const o = {};
+    [...g.querySelectorAll('.set')].forEach((row, k) => {
+      const [wk, rk, ik] = KEYS[k];
+      o[wk] = num(row.querySelector('.w').value);
+      o[rk] = num(row.querySelector('.r').value);
+      o[ik] = num(row.querySelector('.rir').value);
+    });
+    return o;
+  });
   const h = state.history[id] || (state.history[id] = []);
   const i = h.findIndex(x => x.date === today());
-  if (sets.some(s => s.r != null)) {
-    const entry = { date: today(), sets };
+  if (sets.some(s => s.r != null || s.r2 != null)) {
+    const entry = { date: today(), sets, t: Date.now() };
     i >= 0 ? h[i] = entry : h.push(entry);
   } else if (i >= 0) {
-    h.splice(i, 1);
+    // Borrado lógico: así la sincronización no lo "resucita" desde otro dispositivo
+    h[i] = { date: today(), sets: [], t: Date.now(), del: true };
   }
-  save();
+  saveAndSync();
 
   const ex = day().exercises.find(x => x.id === id);
-  const n = sets.filter(s => s.r != null).length;
+  const n = sets.filter(isDone).length;
   li.querySelector('.prog').textContent = `${n}/${Math.max(ex.setsMax, sets.length)}`;
   li.classList.toggle('done', n >= ex.setsMin);
   updateMeta();
@@ -339,9 +389,10 @@ list.addEventListener('click', e => {
   } else if (btn.dataset.act) {
     move(li.dataset.id, btn.dataset.act);
   } else if (btn.classList.contains('add')) {
-    const rows = li.querySelectorAll('.set');
-    const lastW = rows[rows.length - 1].querySelector('.w').value;
-    btn.insertAdjacentHTML('beforebegin', rowHTML(rows.length, lastW, null, null, null, null));
+    const grps = li.querySelectorAll('.grp');
+    const ws = [...grps[grps.length - 1].querySelectorAll('.w')].map(x => x.value);
+    const ex = day().exercises.find(x => x.id === li.dataset.id);
+    btn.insertAdjacentHTML('beforebegin', setHTML(grps.length, ex, null, null, ws));
   }
 });
 
@@ -353,7 +404,8 @@ function move(id, act) {
   if (act !== 'top' && (j < 0 || j >= a.length)) return;
   const [it] = a.splice(i, 1);
   a.splice(j, 0, it);
-  save(); render();
+  state.meta.orderT = Date.now();
+  saveAndSync(); render();
 }
 
 let drag = null;
@@ -383,7 +435,8 @@ function endDrag(cancel) {
     const [it] = a.splice(i, 1);
     const k = next ? a.findIndex(x => x.id === next.dataset.id) : a.length;
     a.splice(k, 0, it);
-    save();
+    state.meta.orderT = Date.now();
+    saveAndSync();
   }
   render();
 }
@@ -409,13 +462,129 @@ $('#importFile').addEventListener('change', async e => {
     const s = JSON.parse(await f.text());
     if (!Array.isArray(s.days) || !s.history) throw new Error('formato');
     if (confirm('Se reemplazarán los datos actuales. ¿Continuar?')) {
-      state = s; state.ui = state.ui || { day:0 }; save(); render(); toast('Datos importados');
+      state = s; state.ui = state.ui || { day:0 }; state.meta = state.meta || { orderT: Date.now() }; saveAndSync(); render(); toast('Datos importados');
     }
   } catch (_) { toast('Archivo no válido'); }
   e.target.value = '';
 });
 
+/* ---------- Sincronización con un Gist privado de GitHub ---------- */
+const SKEY = 'entreno.sync';           // el token vive aparte: nunca entra en las copias exportadas
+let sync = (() => { try { return JSON.parse(localStorage.getItem(SKEY)) || {}; } catch (_) { return {}; } })();
+const saveSync = () => { try { localStorage.setItem(SKEY, JSON.stringify(sync)); } catch (_) {} };
+const FILE = 'entreno.json';
+let syncing = false, again = false, syncTimer;
+
+const setStatus = msg => { $('#syncStatus').textContent = msg; };
+const hhmm = () => new Date().toLocaleTimeString('es-ES', { hour:'2-digit', minute:'2-digit' });
+function saveAndSync() { save(); scheduleSync(); }
+function scheduleSync(ms = 3000) {
+  if (!sync.token) return;
+  clearTimeout(syncTimer); syncTimer = setTimeout(() => syncNow(false), ms);
+}
+
+async function gh(path, opts = {}) {
+  const r = await fetch('https://api.github.com' + path, {
+    ...opts,
+    headers: { 'Accept':'application/vnd.github+json', 'Authorization':'Bearer ' + sync.token,
+               'Content-Type':'application/json' }
+  });
+  if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+  return r.json();
+}
+async function findGist() {
+  for (let page = 1; page <= 5; page++) {
+    const l = await gh(`/gists?per_page=100&page=${page}`);
+    const g = l.find(x => x.files && x.files[FILE]);
+    if (g) return g.id;
+    if (l.length < 100) break;
+  }
+  return null;
+}
+async function readGist(id) {
+  const g = await gh('/gists/' + id);
+  const f = g.files && g.files[FILE];
+  if (!f) return null;
+  let text = f.content;
+  if (f.truncated) text = await (await fetch(f.raw_url)).text();
+  return JSON.parse(text);
+}
+
+// Forma estable para comparar y subir (sin el día de la pestaña, que es de cada dispositivo)
+function norm(s) {
+  const history = {};
+  Object.keys(s.history).sort().forEach(id => {
+    history[id] = s.history[id].slice().sort((a, b) => a.date.localeCompare(b.date));
+  });
+  return { days: s.days, meta: { orderT: (s.meta && s.meta.orderT) || 0 }, history };
+}
+
+/* Fusión: por cada ejercicio y fecha gana la entrada más reciente (t); el orden de los
+   ejercicios gana el dispositivo que lo cambió más tarde. Nada se pierde por sincronizar. */
+function merge(local, remote) {
+  const lt = (local.meta && local.meta.orderT) || 0, rt = (remote.meta && remote.meta.orderT) || 0;
+  const out = { days: rt > lt ? remote.days : local.days, history: {}, ui: local.ui, meta: { orderT: Math.max(lt, rt) } };
+  const ids = new Set([...Object.keys(local.history), ...Object.keys(remote.history)]);
+  ids.forEach(id => {
+    const byDate = {};
+    [...(remote.history[id] || []), ...(local.history[id] || [])].forEach(e => {
+      const cur = byDate[e.date];
+      if (!cur || (e.t || 0) >= (cur.t || 0)) byDate[e.date] = e;   // empate: gana la local (va después)
+    });
+    out.history[id] = Object.values(byDate);
+  });
+  return out;
+}
+
+async function syncNow(manual) {
+  if (!sync.token) { if (manual) setStatus('Pega tu token de GitHub y pulsa Conectar.'); return; }
+  if (syncing) { again = true; return; }
+  syncing = true; setStatus('Sincronizando…');
+  try {
+    if (!sync.gistId) { sync.gistId = await findGist(); saveSync(); }
+    let remote = sync.gistId ? await readGist(sync.gistId) : null;
+    if (remote && !(Array.isArray(remote.days) && remote.history)) remote = null;
+
+    const before = JSON.stringify(norm(state));
+    const merged = remote ? merge(state, remote) : state;
+    const changed = JSON.stringify(norm(merged)) !== before;
+    state = merged; save();
+
+    const payload = JSON.stringify(norm(state));
+    const files = { [FILE]: { content: payload } };
+    if (!sync.gistId) {
+      const g = await gh('/gists', { method:'POST', body: JSON.stringify({ description:'Entreno (datos)', public:false, files }) });
+      sync.gistId = g.id; saveSync();
+    } else if (!remote || JSON.stringify(norm(remote)) !== payload) {
+      await gh('/gists/' + sync.gistId, { method:'PATCH', body: JSON.stringify({ files }) });
+    }
+    if (changed && !list.contains(document.activeElement)) render();
+    setStatus('Sincronizado a las ' + hhmm());
+  } catch (e) {
+    setStatus(e.status === 401 ? 'Token no válido o caducado.' :
+              e.status === 403 || e.status === 404 ? 'El token no tiene permiso de gist.' :
+              'No se pudo sincronizar (¿sin conexión?). Los datos siguen guardados en este dispositivo.');
+  } finally {
+    syncing = false;
+    if (again) { again = false; scheduleSync(1500); }
+  }
+}
+
+$('#connectBtn').addEventListener('click', () => {
+  const t = $('#tokenInput').value.trim();
+  if (!t) { setStatus('Pega primero tu token.'); return; }
+  sync = { token: t }; saveSync(); $('#tokenInput').value = ''; syncNow(true);
+});
+$('#syncBtn').addEventListener('click', () => syncNow(true));
+$('#disconnectBtn').addEventListener('click', () => {
+  sync = {}; saveSync(); setStatus('Desconectado. Tus datos siguen en este dispositivo.');
+});
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNow(false); });
+window.addEventListener('online', () => syncNow(false));
+setStatus(sync.token ? 'Conectado.' : 'Sin conectar: los datos solo están en este dispositivo.');
+
 render();
+if (sync.token) syncNow(false);
 })();
 </script>
 </body>
