@@ -160,7 +160,7 @@ const SEED = [
   { name:'Torso', ex:[
     ['Laterales mancuerna','3','10-12','1-2'], ['Press Francés','3','8-10','1-2'],
     ['Ext. catana','2','8-10','1-0'], ['Curl barra W','3','10-8','1-2'],
-    ['Remo','3','8-10','1-0',null,['Máquina agarre neutro','Mancuernas']],
+    ['Remo','3','8-10','1-0',null,['Máquina agarre neutro','Mancuernas (unilateral)']],
     ['Press Inclinado Mancuerna','2','8','1-2'] ]}
 ];
 
@@ -207,6 +207,8 @@ function load() {
         if (e.name === 'Remo barra libre' && !e.variants) e.variants = ['Barra libre', 'Máquina agarre prono'];
         if (e.name === 'Curl bayesiano' && !e.variants) e.variants = ['Polea', 'Mancuerna'];
         if (e.name === 'Sentadilla Multi/Búlgara' && !e.variants) { e.name = 'Sentadilla'; e.variants = ['Multipower', 'Búlgaras']; }
+        // Precisar la etiqueta de la 2ª variante del Remo (Torso), introducida en una versión previa
+        if (e.name === 'Remo' && e.variants && e.variants[1] === 'Mancuernas') e.variants[1] = 'Mancuernas (unilateral)';
       }));
       // El Remo Gironda ya no se usa
       s.days.forEach(d => { d.exercises = d.exercises.filter(e => e.name !== 'Remo Gironda'); });
