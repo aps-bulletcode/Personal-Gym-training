@@ -135,7 +135,6 @@ summary{cursor:pointer;min-height:36px}
 'use strict';
 
 /* ---------- Datos iniciales ---------- */
-// [nombre, series, repeticiones, RIR]  (los rangos se normalizan: "10-8" => 8–10)
 const SEED = [
   { name:'Pierna A', ex:[
     ['Ext. cuádriceps','3','10-12','1-0'], ['Hack Squat','2','6-8','1-2'],
@@ -145,7 +144,7 @@ const SEED = [
     ['Ext. horizontal polea','3','10-12','1-0'],
     ['Fondos lastre','3','6-8','1-2',null,['Fondos con lastre','Polea alta (pecho inferior)']],
     ['Press inclinado multipower','2','6-8','1-2'], ['Polea baja arriba','3','10-12','1-0'],
-    ['Laterales mancuerna','3','10-12','1-2'] ]},
+    ['Laterales','3','10-12','1-2',null,['De pie','Sentado con mancuerna','Polea con pulsera']] ]},
   { name:'Pull', ex:[
     ['Jalón pecho','3','8','1-2'],
     ['Remo barra libre','2-3','6-8','1-2',null,['Barra libre','Máquina agarre prono']],
@@ -158,9 +157,11 @@ const SEED = [
     ['Peso Muerto mancuernas','3','8-10','1-0'], ['Curl Femoral','2','8-10','1-0'],
     ['Gemelo','3','10-12','1-0'], ['Core','2','30','1-0'] ]},
   { name:'Torso', ex:[
-    ['Laterales mancuerna','3','10-12','1-2'], ['Press Francés','3','8-10','1-2'],
-    ['Ext. catana','2','8-10','1-0'], ['Curl barra W','3','10-8','1-2'],
-    ['Remo','3','8-10','1-0',null,['Máquina agarre neutro','Mancuernas (unilateral)']],
+    ['Laterales','3','10-12','1-2',null,['De pie','Sentado con mancuerna','Polea con pulsera']],
+    ['Press Francés','3','8-10','1-2'],
+    ['Ext. catana','2','8-10','1-0'],
+    ['Curl barra W','3','10-8','1-2'],
+    ['Remo','3','8-10','1-2'],
     ['Press Inclinado Mancuerna','2','8','1-2'] ]}
 ];
 
@@ -196,22 +197,37 @@ function load() {
     if (s && Array.isArray(s.days) && s.history) {
       s.ui = s.ui || { day:0 };
       s.meta = s.meta || { orderT: 0 };
-      // Migración: el Remo Gironda tiene RIR objetivo 1-0
-      s.days.forEach(d => d.exercises.forEach(e => {
-        if (e.name === 'Remo Gironda' && e.rirMax == null) { e.rirMin = 0; e.rirMax = 1; }
-        // Antebrazo pasa a superserie supino + prono
-        if (e.name === 'Antebrazo' && !e.parts) e.parts = ['Supino', 'Prono'];
-        // Ejercicios que ahora son un selector de variante (el historial previo
-        // queda asignado a la primera variante, que es la que ya se venía haciendo)
-        if (e.name === 'Fondos lastre' && !e.variants) e.variants = ['Fondos con lastre', 'Polea alta (pecho inferior)'];
-        if (e.name === 'Remo barra libre' && !e.variants) e.variants = ['Barra libre', 'Máquina agarre prono'];
-        if (e.name === 'Curl bayesiano' && !e.variants) e.variants = ['Polea', 'Mancuerna'];
-        if (e.name === 'Sentadilla Multi/Búlgara' && !e.variants) { e.name = 'Sentadilla'; e.variants = ['Multipower', 'Búlgaras']; }
-        // Precisar la etiqueta de la 2ª variante del Remo (Torso), introducida en una versión previa
-        if (e.name === 'Remo' && e.variants && e.variants[1] === 'Mancuernas') e.variants[1] = 'Mancuernas (unilateral)';
-      }));
-      // El Remo Gironda ya no se usa
-      s.days.forEach(d => { d.exercises = d.exercises.filter(e => e.name !== 'Remo Gironda'); });
+      
+      s.days.forEach(d => {
+        d.exercises.forEach(e => {
+          // Limpieza de emergencia por si la versión anterior rompió los datos
+          if (e.variants && e.variants.length > 0 && typeof e.variants[0] === 'object') {
+            e.variants = e.variants.map(v => v.name || 'Variante');
+          }
+
+          if (e.name === 'Remo Gironda' && e.rirMax == null) { e.rirMin = 0; e.rirMax = 1; }
+          if (e.name === 'Antebrazo' && !e.parts) e.parts = ['Supino', 'Prono'];
+          if (e.name === 'Fondos lastre' && !e.variants) e.variants = ['Fondos con lastre', 'Polea alta (pecho inferior)'];
+          if (e.name === 'Remo barra libre' && !e.variants) e.variants = ['Barra libre', 'Máquina agarre prono'];
+          if (e.name === 'Curl bayesiano' && !e.variants) e.variants = ['Polea', 'Mancuerna'];
+          if (e.name === 'Sentadilla Multi/Búlgara' && !e.variants) { e.name = 'Sentadilla'; e.variants = ['Multipower', 'Búlgaras']; }
+          
+          if (e.name === 'Laterales mancuerna' || e.name === 'Laterales') {
+            e.name = 'Laterales';
+            e.variants = ['De pie', 'Sentado con mancuerna', 'Polea con pulsera'];
+          }
+        });
+        
+        d.exercises = d.exercises.filter(e => e.name !== 'Remo Gironda');
+
+        // En Torso eliminamos el ejercicio duplicado de remo con mancuerna/máquina.
+        if (d.name === 'Torso' || d.id === 'd5') {
+          d.exercises = d.exercises.filter(e =>
+            e.name !== 'Remo (mancuerna neutro / máquina prono)'
+          );
+        }
+      });
+
       return s;
     }
   } catch (_) {}
@@ -245,22 +261,15 @@ const hist = id => state.history[id] || [];
 const sameV = (h, v) => (h.variant || 0) === (v || 0);
 const todayEntry = (id, v) => hist(id).find(h => h.date === today() && !h.del && sameV(h, v));
 const prevEntry = (id, v) => hist(id).filter(h => h.date < today() && !h.del && sameV(h, v)).sort((a, b) => a.date.localeCompare(b.date)).pop();
-// Variante usada la última vez (hoy o en cualquier sesión anterior); si no hay historial, la primera.
 function lastVariant(id) {
   const h = hist(id).filter(x => !x.del).sort((a, b) => (a.t || 0) - (b.t || 0) || a.date.localeCompare(b.date)).pop();
   return h ? (h.variant || 0) : 0;
 }
-const selVariant = {}; // elección de variante en esta sesión del navegador; no se guarda, parte del último uso
-// Un ejercicio puede tener 2 partes (superserie): 1ª = w/r/rir, 2ª = w2/r2/rir2
+const selVariant = {}; 
 const KEYS = [['w', 'r', 'rir'], ['w2', 'r2', 'rir2']];
 const isDone = s => s.r != null && (s.r2 === undefined || s.r2 != null);
 const completed = e => e.sets.filter(isDone);
 
-/* Regla "Subir Peso": en la sesión anterior, TODAS las series registradas llegaron
-   al máximo del rango de repeticiones y respetaron el RIR objetivo (RIR real <= máximo
-   del rango objetivo, es decir, sin quedarte más corto de esfuerzo del permitido).
-   Además debe haber al menos el mínimo de series del ejercicio.
-   En una superserie se evalúa cada parte por separado y devuelve las que deben subir. */
 function partsUp(ex, entry) {
   const done = completed(entry);
   if (done.length < ex.setsMin) return [];
@@ -308,7 +317,9 @@ function setHTML(i, ex, c, p, wDef) {
 
 function card(ex) {
   const v = ex.variants ? (ex.id in selVariant ? selVariant[ex.id] : lastVariant(ex.id)) : 0;
-  const prev = prevEntry(ex.id, v), cur = todayEntry(ex.id, v);
+  const safeV = (ex.variants && v < ex.variants.length) ? v : 0;
+  
+  const prev = prevEntry(ex.id, safeV), cur = todayEntry(ex.id, safeV);
   const pd = prev ? completed(prev) : [];
   const flag = !!prev && shouldIncrease(ex, prev);
   const doneN = cur ? completed(cur).length : 0;
@@ -325,7 +336,7 @@ function card(ex) {
   const rx = `${lab(ex.setsMin, ex.setsMax)}×${lab(ex.repMin, ex.repMax)}` +
              (ex.rirMax != null ? `  ·  RIR ${lab(ex.rirMin, ex.rirMax)}` : '') +
              (ex.parts ? `  ·  Superserie ${ex.parts.map(x => x.toLowerCase()).join(' + ')}` : '') +
-             (ex.variants ? `  ·  ${esc(ex.variants[v])}` : '');
+             (ex.variants ? `  ·  ${esc(ex.variants[safeV])}` : '');
 
   const history = prev
     ? `<h2>A batir: sesión del ${fmtDate(prev.date)}</h2><ul>${pd.map(s => '<li>' + (ex.parts || ['']).map((nm, k) => {
@@ -336,9 +347,9 @@ function card(ex) {
     : `<h2>Sesión anterior</h2><p>Primera vez: registra tu marca de partida.</p>`;
 
   const vartabs = ex.variants ? `<div class="vartabs" role="tablist">${ex.variants.map((nm, k) =>
-    `<button type="button" role="tab" aria-selected="${k === v}" data-vswitch="${k}">${esc(nm)}</button>`).join('')}</div>` : '';
+    `<button type="button" role="tab" aria-selected="${k === safeV}" data-vswitch="${k}">${esc(nm)}</button>`).join('')}</div>` : '';
 
-  return `<li class="ex${flag ? ' flag' : ''}${doneN >= ex.setsMin ? ' done' : ''}" data-id="${ex.id}" data-v="${v}">
+  return `<li class="ex${flag ? ' flag' : ''}${doneN >= ex.setsMin ? ' done' : ''}" data-id="${ex.id}" data-v="${safeV}">
     <div class="row">
       <div class="grip" aria-label="Arrastrar para reordenar"><svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor"><circle cx="6" cy="4" r="1.6"/><circle cx="12" cy="4" r="1.6"/><circle cx="6" cy="9" r="1.6"/><circle cx="12" cy="9" r="1.6"/><circle cx="6" cy="14" r="1.6"/><circle cx="12" cy="14" r="1.6"/></svg></div>
       <button class="head" type="button" aria-expanded="false">
@@ -354,7 +365,7 @@ function card(ex) {
     <div class="panel">
       ${vartabs}
       <div class="hist">${history}</div>
-      ${flag ? `<p class="bump">Llegaste a ${ex.repMax} reps en todas las series con el RIR objetivo${ex.parts ? ` en ${up.map(k => ex.parts[k].toLowerCase()).join(' y ')}` : ''}. Hoy sube el peso${ex.variants ? ` (${esc(ex.variants[v])})` : ''}.</p>` : ''}
+      ${flag ? `<p class="bump">Llegaste a ${ex.repMax} reps en todas las series con el RIR objetivo${ex.parts ? ` en ${up.map(k => ex.parts[k].toLowerCase()).join(' y ')}` : ''}. Hoy sube el peso${ex.variants ? ` (${esc(ex.variants[safeV])})` : ''}.</p>` : ''}
       <div class="cols"><span></span><span>Peso (kg)</span><span>Reps</span><span>RIR</span></div>
       ${rows}
       <button class="add" type="button">+ Serie</button>
@@ -364,7 +375,10 @@ function card(ex) {
 
 function updateMeta() {
   const exs = day().exercises;
-  const vOf = e => e.variants ? (e.id in selVariant ? selVariant[e.id] : lastVariant(e.id)) : 0;
+  const vOf = e => {
+    const v = e.variants ? (e.id in selVariant ? selVariant[e.id] : lastVariant(e.id)) : 0;
+    return e.variants && v < e.variants.length ? v : 0;
+  };
   const done = exs.filter(e => { const c = todayEntry(e.id, vOf(e)); return c && completed(c).length >= e.setsMin; }).length;
   const flags = exs.filter(e => { const p = prevEntry(e.id, vOf(e)); return p && shouldIncrease(e, p); }).length;
   $('#dayMeta').innerHTML = `${done} de ${exs.length} hechos hoy` +
@@ -392,7 +406,6 @@ list.addEventListener('input', e => {
     const entry = { date: today(), sets, variant: v, t: Date.now() };
     i >= 0 ? h[i] = entry : h.push(entry);
   } else if (i >= 0) {
-    // Borrado lógico: así la sincronización no lo "resucita" desde otro dispositivo
     h[i] = { date: today(), sets: [], variant: v, t: Date.now(), del: true };
   }
   saveAndSync();
@@ -510,7 +523,7 @@ $('#importFile').addEventListener('change', async e => {
 });
 
 /* ---------- Sincronización con un Gist privado de GitHub ---------- */
-const SKEY = 'entreno.sync';           // el token vive aparte: nunca entra en las copias exportadas
+const SKEY = 'entreno.sync';
 let sync = (() => { try { return JSON.parse(localStorage.getItem(SKEY)) || {}; } catch (_) { return {}; } })();
 const saveSync = () => { try { localStorage.setItem(SKEY, JSON.stringify(sync)); } catch (_) {} };
 const FILE = 'entreno.json';
@@ -551,7 +564,6 @@ async function readGist(id) {
   return JSON.parse(text);
 }
 
-// Forma estable para comparar y subir (sin el día de la pestaña, que es de cada dispositivo)
 function norm(s) {
   const history = {};
   Object.keys(s.history).sort().forEach(id => {
@@ -560,8 +572,6 @@ function norm(s) {
   return { days: s.days, meta: { orderT: (s.meta && s.meta.orderT) || 0 }, history };
 }
 
-/* Fusión: por cada ejercicio y fecha gana la entrada más reciente (t); el orden de los
-   ejercicios gana el dispositivo que lo cambió más tarde. Nada se pierde por sincronizar. */
 function merge(local, remote) {
   const lt = (local.meta && local.meta.orderT) || 0, rt = (remote.meta && remote.meta.orderT) || 0;
   const out = { days: rt > lt ? remote.days : local.days, history: {}, ui: local.ui, meta: { orderT: Math.max(lt, rt) } };
@@ -571,7 +581,7 @@ function merge(local, remote) {
     [...(remote.history[id] || []), ...(local.history[id] || [])].forEach(e => {
       const key = e.date + ':' + (e.variant || 0);
       const cur = byDate[key];
-      if (!cur || (e.t || 0) >= (cur.t || 0)) byDate[key] = e;   // empate: gana la local (va después)
+      if (!cur || (e.t || 0) >= (cur.t || 0)) byDate[key] = e;
     });
     out.history[id] = Object.values(byDate);
   });
