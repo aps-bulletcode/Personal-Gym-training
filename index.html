@@ -142,11 +142,14 @@ const SEED = [
     ['Crunch abdominal','3','10-12','1-0'] ]},
   { name:'Push', ex:[
     ['Ext. horizontal polea','3','10-12','1-0'],
-    ['Fondos lastre','3','6-8','1-2',null,['Fondos con lastre','Polea alta (pecho inferior)']],
-    ['Press inclinado multipower','2','6-8','1-2'], ['Polea baja arriba','3','10-12','1-0'],
+    ['Fondos lastre','2','6-8','1-2',null,['Fondos con lastre','Polea alta (pecho inferior)']],
+    ['Press inclinado multipower','2','6-8','1-2'],
+    ['Press militar','2','6-8','1-2',null,null,{ id:'d2e_pressmilitar' }],
+    ['Polea baja arriba','2','10-12','1-0'],
     ['Laterales','3','10-12','1-2',null,['De pie','Sentado con mancuerna','Polea con pulsera']] ]},
   { name:'Pull', ex:[
-    ['Jalón pecho','3','8','1-2'],
+    ['Jalón pecho','3','6-8','1-2'],
+    ['Jalón agarre estrecho','2','6-8','1-2',null,null,{ id:'d3e_jalonestrecho' }],
     ['Remo barra libre','2-3','6-8','1-2',null,['Barra libre','Máquina agarre prono']],
     ['Pull-over','2','10-12','1-0'], ['Martillo mancuernas','2','8-10','1-2'],
     ['Curl bayesiano','3','8-10','1-0',null,['Polea','Mancuerna']],
@@ -162,6 +165,8 @@ const SEED = [
     ['Ext. catana','2','8-10','1-0'],
     ['Curl barra W','3','10-8','1-2'],
     ['Remo','3','8-10','1-2'],
+    ['Remo unilateral','2','6-8','1-2',null,['Mancuerna unilateral','Máquina agarre neutro'],
+      { id:'d5e_remounilateral', vrx:[['2','6-8','1-2'],['2','8-10','0-1']] }],
     ['Press Inclinado Mancuerna','2','8','1-2'] ]}
 ];
 
@@ -171,19 +176,33 @@ const range = s => {
   return [Math.min(...p), Math.max(...p)];
 };
 
+// Pauta (series, reps, RIR) a partir de textos como '2', '6-8', '1-2'
+const mkRx = (sets, reps, rir) => {
+  const [setsMin, setsMax] = range(sets);
+  const [repMin, repMax] = range(reps);
+  const r = range(rir);
+  return { setsMin, setsMax, repMin, repMax, rirMin: r ? r[0] : null, rirMax: r ? r[1] : null };
+};
+const mkEx = (id, name, sets, reps, rir, extra) => ({
+  id, name, ...mkRx(sets, reps, rir),
+  ...(extra && extra.variants ? { variants: extra.variants } : {}),
+  ...(extra && extra.vrx ? { vrx: extra.vrx.map(a => mkRx(...a)) } : {})
+});
+
 function buildSeed() {
-  return SEED.map((d, di) => ({
-    id: 'd' + (di + 1),
-    name: d.name,
-    exercises: d.ex.map(([name, sets, reps, rir, parts, variants], ei) => {
-      const [setsMin, setsMax] = range(sets);
-      const [repMin, repMax] = range(reps);
-      const r = range(rir);
-      return { id:`d${di + 1}e${ei + 1}`, name, setsMin, setsMax, repMin, repMax,
-               rirMin: r ? r[0] : null, rirMax: r ? r[1] : null,
-               ...(parts ? { parts } : {}), ...(variants ? { variants } : {}) };
-    })
-  }));
+  return SEED.map((d, di) => {
+    let n = 0; // los ejercicios con id propio no desplazan la numeración de los demás
+    return {
+      id: 'd' + (di + 1),
+      name: d.name,
+      exercises: d.ex.map(([name, sets, reps, rir, parts, variants, extra]) => {
+        const id = extra && extra.id ? extra.id : `d${di + 1}e${++n}`;
+        return { id, name, ...mkRx(sets, reps, rir),
+                 ...(parts ? { parts } : {}), ...(variants ? { variants } : {}),
+                 ...(extra && extra.vrx ? { vrx: extra.vrx.map(a => mkRx(...a)) } : {}) };
+      })
+    };
+  });
 }
 
 /* ---------- Estado y persistencia ---------- */
@@ -197,41 +216,73 @@ function load() {
     if (s && Array.isArray(s.days) && s.history) {
       s.ui = s.ui || { day:0 };
       s.meta = s.meta || { orderT: 0 };
-      
-      s.days.forEach(d => {
-        d.exercises.forEach(e => {
-          // Limpieza de emergencia por si la versión anterior rompió los datos
-          if (e.variants && e.variants.length > 0 && typeof e.variants[0] === 'object') {
-            e.variants = e.variants.map(v => v.name || 'Variante');
-          }
-
-          if (e.name === 'Remo Gironda' && e.rirMax == null) { e.rirMin = 0; e.rirMax = 1; }
-          if (e.name === 'Antebrazo' && !e.parts) e.parts = ['Supino', 'Prono'];
-          if (e.name === 'Fondos lastre' && !e.variants) e.variants = ['Fondos con lastre', 'Polea alta (pecho inferior)'];
-          if (e.name === 'Remo barra libre' && !e.variants) e.variants = ['Barra libre', 'Máquina agarre prono'];
-          if (e.name === 'Curl bayesiano' && !e.variants) e.variants = ['Polea', 'Mancuerna'];
-          if (e.name === 'Sentadilla Multi/Búlgara' && !e.variants) { e.name = 'Sentadilla'; e.variants = ['Multipower', 'Búlgaras']; }
-          
-          if (e.name === 'Laterales mancuerna' || e.name === 'Laterales') {
-            e.name = 'Laterales';
-            e.variants = ['De pie', 'Sentado con mancuerna', 'Polea con pulsera'];
-          }
-        });
-        
-        d.exercises = d.exercises.filter(e => e.name !== 'Remo Gironda');
-
-        // En Torso eliminamos el ejercicio duplicado de remo con mancuerna/máquina.
-        if (d.name === 'Torso' || d.id === 'd5') {
-          d.exercises = d.exercises.filter(e =>
-            e.name !== 'Remo (mancuerna neutro / máquina prono)'
-          );
-        }
-      });
-
-      return s;
+      return migrate(s);
     }
   } catch (_) {}
   return { days: buildSeed(), history: {}, ui: { day:0 }, meta: { orderT: 0 } };
+}
+
+// Ajustes sobre datos ya guardados. Es idempotente: se puede ejecutar siempre sin duplicar nada.
+function migrate(s) {
+  // Inserta un ejercicio nuevo justo después de otro (o al final si no lo encuentra)
+  const addAfter = (d, afterName, ex) => {
+    if (d.exercises.some(e => e.id === ex.id || e.name === ex.name)) return;
+    const i = d.exercises.findIndex(e => e.name === afterName);
+    d.exercises.splice(i < 0 ? d.exercises.length : i + 1, 0, ex);
+  };
+  s.days.forEach(d => {
+    d.exercises.forEach(e => {
+      // Limpieza de emergencia por si la versión anterior rompió los datos
+      if (e.variants && e.variants.length > 0 && typeof e.variants[0] === 'object') {
+        e.variants = e.variants.map(v => v.name || 'Variante');
+      }
+
+      if (e.name === 'Remo Gironda' && e.rirMax == null) { e.rirMin = 0; e.rirMax = 1; }
+      if (e.name === 'Antebrazo' && !e.parts) e.parts = ['Supino', 'Prono'];
+      if (e.name === 'Fondos lastre' && !e.variants) e.variants = ['Fondos con lastre', 'Polea alta (pecho inferior)'];
+      if (e.name === 'Remo barra libre' && !e.variants) e.variants = ['Barra libre', 'Máquina agarre prono'];
+      if (e.name === 'Curl bayesiano' && !e.variants) e.variants = ['Polea', 'Mancuerna'];
+      if (e.name === 'Sentadilla Multi/Búlgara' && !e.variants) { e.name = 'Sentadilla'; e.variants = ['Multipower', 'Búlgaras']; }
+      
+      if (e.name === 'Laterales mancuerna' || e.name === 'Laterales') {
+        e.name = 'Laterales';
+        e.variants = ['De pie', 'Sentado con mancuerna', 'Polea con pulsera'];
+      }
+    });
+    
+    d.exercises = d.exercises.filter(e => e.name !== 'Remo Gironda');
+
+    // En Torso eliminamos el ejercicio duplicado de remo con mancuerna/máquina.
+    if (d.name === 'Torso' || d.id === 'd5') {
+      d.exercises = d.exercises.filter(e =>
+        e.name !== 'Remo (mancuerna neutro / máquina prono)'
+      );
+    }
+
+    /* Cambios de rutina */
+    if (d.name === 'Push') {
+      d.exercises.forEach(e => {
+        if ((e.name === 'Polea baja arriba' || e.name === 'Fondos lastre') && e.setsMax === 3) {
+          e.setsMin = 2; e.setsMax = 2;
+        }
+      });
+      addAfter(d, 'Press inclinado multipower', mkEx('d2e_pressmilitar', 'Press militar', '2', '6-8', '1-2'));
+    }
+    if (d.name === 'Pull') {
+      d.exercises.forEach(e => {
+        if (e.name === 'Jalón pecho' && e.repMin === 8 && e.repMax === 8) e.repMin = 6;
+      });
+      addAfter(d, 'Jalón pecho', mkEx('d3e_jalonestrecho', 'Jalón agarre estrecho', '2', '6-8', '1-2'));
+    }
+    if (d.name === 'Torso') {
+      addAfter(d, 'Remo', mkEx('d5e_remounilateral', 'Remo unilateral', '2', '6-8', '1-2', {
+        variants: ['Mancuerna unilateral', 'Máquina agarre neutro'],
+        vrx: [['2', '6-8', '1-2'], ['2', '8-10', '0-1']]
+      }));
+    }
+  });
+
+  return s;
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); }
@@ -270,7 +321,11 @@ const KEYS = [['w', 'r', 'rir'], ['w2', 'r2', 'rir2']];
 const isDone = s => s.r != null && (s.r2 === undefined || s.r2 != null);
 const completed = e => e.sets.filter(isDone);
 
-function partsUp(ex, entry) {
+// Pauta efectiva de un ejercicio según la variante (algunos ejercicios tienen pauta propia por variante)
+const eff = (ex, v) => (ex.vrx && ex.vrx[v || 0]) ? { ...ex, ...ex.vrx[v || 0] } : ex;
+
+function partsUp(ex0, entry) {
+  const ex = eff(ex0, entry.variant || 0);
   const done = completed(entry);
   if (done.length < ex.setsMin) return [];
   const res = [];
@@ -315,9 +370,10 @@ function setHTML(i, ex, c, p, wDef) {
   return h + '</div>';
 }
 
-function card(ex) {
-  const v = ex.variants ? (ex.id in selVariant ? selVariant[ex.id] : lastVariant(ex.id)) : 0;
-  const safeV = (ex.variants && v < ex.variants.length) ? v : 0;
+function card(base) {
+  const v = base.variants ? (base.id in selVariant ? selVariant[base.id] : lastVariant(base.id)) : 0;
+  const safeV = (base.variants && v < base.variants.length) ? v : 0;
+  const ex = eff(base, safeV);
   
   const prev = prevEntry(ex.id, safeV), cur = todayEntry(ex.id, safeV);
   const pd = prev ? completed(prev) : [];
@@ -379,7 +435,7 @@ function updateMeta() {
     const v = e.variants ? (e.id in selVariant ? selVariant[e.id] : lastVariant(e.id)) : 0;
     return e.variants && v < e.variants.length ? v : 0;
   };
-  const done = exs.filter(e => { const c = todayEntry(e.id, vOf(e)); return c && completed(c).length >= e.setsMin; }).length;
+  const done = exs.filter(e => { const c = todayEntry(e.id, vOf(e)); return c && completed(c).length >= eff(e, vOf(e)).setsMin; }).length;
   const flags = exs.filter(e => { const p = prevEntry(e.id, vOf(e)); return p && shouldIncrease(e, p); }).length;
   $('#dayMeta').innerHTML = `${done} de ${exs.length} hechos hoy` +
     (flags ? `<span class="up">${flags} para subir peso</span>` : '');
@@ -410,7 +466,7 @@ list.addEventListener('input', e => {
   }
   saveAndSync();
 
-  const ex = day().exercises.find(x => x.id === id);
+  const ex = eff(day().exercises.find(x => x.id === id), v);
   const n = sets.filter(isDone).length;
   li.querySelector('.prog').textContent = `${n}/${Math.max(ex.setsMax, sets.length)}`;
   li.classList.toggle('done', n >= ex.setsMin);
@@ -597,8 +653,9 @@ async function syncNow(manual) {
     let remote = sync.gistId ? await readGist(sync.gistId) : null;
     if (remote && !(Array.isArray(remote.days) && remote.history)) remote = null;
 
+    const remoteStr = remote ? JSON.stringify(norm(remote)) : null;
     const before = JSON.stringify(norm(state));
-    const merged = remote ? merge(state, remote) : state;
+    const merged = migrate(remote ? merge(state, remote) : state);
     const changed = JSON.stringify(norm(merged)) !== before;
     state = merged; save();
 
@@ -607,7 +664,7 @@ async function syncNow(manual) {
     if (!sync.gistId) {
       const g = await gh('/gists', { method:'POST', body: JSON.stringify({ description:'Entreno (datos)', public:false, files }) });
       sync.gistId = g.id; saveSync();
-    } else if (!remote || JSON.stringify(norm(remote)) !== payload) {
+    } else if (!remote || remoteStr !== payload) {
       await gh('/gists/' + sync.gistId, { method:'PATCH', body: JSON.stringify({ files }) });
     }
     if (changed && !list.contains(document.activeElement)) render();
