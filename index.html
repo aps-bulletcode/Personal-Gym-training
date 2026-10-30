@@ -80,6 +80,7 @@ h1{margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em}
 /* Tendencia */
 .trend svg{display:block;width:100%;height:36px;margin:2px 0 8px;color:var(--muted)}
 .hist.trend p{margin:8px 0 0;font-size:14px}
+.trackbtn{margin-top:10px;min-height:40px;font-size:14px}
 #progList h3{margin:14px 0 2px;font-size:14px;color:var(--ink)}
 .plist{list-style:none;margin:0;padding:0}
 .plist li{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line)}
@@ -125,7 +126,11 @@ summary{cursor:pointer;min-height:36px}
   <ol id="list"></ol>
   <details id="progress">
     <summary>Progreso: ¿estancado o subiendo?</summary>
-    <p class="note">Se compara tu mejor marca estimada (1RM) de las últimas 3 sesiones con la de las anteriores, dentro de una ventana de 6 semanas. Hacen falta al menos 4 sesiones del ejercicio.</p>
+    <p class="note">Se compara tu mejor marca estimada (1RM) de las últimas 3 sesiones con la de las anteriores, dentro de una ventana de 6 semanas. Hacen falta al menos 4 sesiones del ejercicio. Si cambiaste de polea, máquina o forma de ejecutar, reinicia el seguimiento y solo contarán las sesiones desde hoy (el histórico no se borra).</p>
+    <div class="tools2">
+      <button class="ghost" id="trackAllBtn" type="button">Empezar de cero todos desde hoy</button>
+      <button class="ghost" id="trackClearBtn" type="button">Usar todo el histórico</button>
+    </div>
     <div id="progList"></div>
   </details>
   <details>
@@ -415,6 +420,12 @@ const daysAgo = n => {
   const d = new Date(); d.setDate(d.getDate() - n);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
+const trackOf = id => (state.meta.track && state.meta.track[id] && state.meta.track[id].d) || '';
+function setTrack(ids, on) {
+  const tr = state.meta.track = state.meta.track || {}, t = Date.now();
+  ids.forEach(id => { tr[id] = { d: on ? today() : '', t }; });
+  saveAndSync();
+}
 const curV = e => {
   const v = e.variants ? (e.id in selVariant ? selVariant[e.id] : lastVariant(e.id)) : 0;
   return e.variants && v < e.variants.length ? v : 0;
@@ -432,13 +443,13 @@ function sessionScore(ex, entry) {
   return tot > 0 ? { score: tot, kg } : null;
 }
 function trend(base, v) {
-  const ex = eff(base, v), from = daysAgo(WIN_DAYS);
+  const ex = eff(base, v), since = trackOf(ex.id), from = [daysAgo(WIN_DAYS), since].sort().pop();
   const pts = hist(ex.id)
     .filter(h => !h.del && sameV(h, v) && h.date >= from && completed(h).length >= ex.setsMin)
     .sort((a, b) => a.date.localeCompare(b.date))
     .map(h => { const s = sessionScore(ex, h); return s && { date: h.date, score: s.score, kg: s.kg }; })
     .filter(Boolean);
-  const out = { status: 'few', pts };
+  const out = { status: 'few', pts, since };
   if (pts.length < MIN_SESS) return out;
   const early = pts.slice(0, -RECENT).map(p => p.score), late = pts.slice(-RECENT).map(p => p.score);
   const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
@@ -560,7 +571,9 @@ function spark(pts) {
 }
 function trendNote(base, t) {
   const u = t.pts.some(p => p.kg) ? ' kg' : '';
-  if (t.status === 'few') return `Aún pocos datos: ${t.pts.length} de ${MIN_SESS} sesiones necesarias en las últimas 6 semanas.`;
+  if (t.status === 'few') return t.since
+    ? `Seguimiento iniciado el ${fmtDate(t.since)}: ${t.pts.length} de ${MIN_SESS} sesiones necesarias.`
+    : `Aún pocos datos: ${t.pts.length} de ${MIN_SESS} sesiones necesarias en las últimas 6 semanas.`;
   if (t.status === 'up') return `Vas progresando: tu mejor marca estimada pasó de ${r1(t.bestEarly)}${u} a ${r1(t.bestLate)}${u}.`;
   if (t.status === 'bump') return 'Ya toca subir peso: sube y vuelve a medir.';
   const alt = base.variants ? 'prueba la otra variante o cambia de ejercicio' : 'valora cambiar de ejercicio';
@@ -569,7 +582,7 @@ function trendNote(base, t) {
 }
 function trendHTML(base, t) {
   const chips = t.pts.map(p => `<li>${fmtDate(p.date)}<span>${r1(p.score)}${p.kg ? ' kg' : ''}</span></li>`).join('');
-  return `<div class="hist trend"><h2>Tendencia · últimas 6 semanas (1RM estimado)</h2>${t.pts.length > 1 ? spark(t.pts) : ''}${chips ? `<ul>${chips}</ul>` : ''}<p>${esc(trendNote(base, t))}</p></div>`;
+  return `<div class="hist trend"><h2>Tendencia · últimas 6 semanas (1RM estimado)</h2>${t.pts.length > 1 ? spark(t.pts) : ''}${chips ? `<ul>${chips}</ul>` : ''}<p>${esc(trendNote(base, t))}</p><button type="button" class="ghost trackbtn" data-track="${t.since ? 'clear' : 'reset'}">${t.since ? 'Usar todo el histórico' : 'Reiniciar seguimiento desde hoy'}</button></div>`;
 }
 function progressHTML() {
   const label = { up:'Progresando', bump:'Toca subir peso', stall:'Estancado', down:'Bajando', few:'Pocos datos' };
@@ -641,6 +654,16 @@ list.addEventListener('click', e => {
       li.classList.add('open'); btn.setAttribute('aria-expanded', 'true');
       li.scrollIntoView({ block:'start' });
     }
+  } else if (btn.dataset.track) {
+    const ex = day().exercises.find(x => x.id === li.dataset.id);
+    const on = btn.dataset.track === 'reset';
+    setTrack([ex.id], on);
+    const wasOpen = li.classList.contains('open');
+    li.outerHTML = card(ex);
+    const fresh = list.querySelector(`.ex[data-id="${CSS.escape(ex.id)}"]`);
+    if (wasOpen) { fresh.classList.add('open'); fresh.querySelector('.head').setAttribute('aria-expanded', 'true'); }
+    updateMeta(); $('#progList').innerHTML = progressHTML();
+    toast(on ? 'Seguimiento reiniciado desde hoy' : 'Usando todo el histórico');
   } else if (btn.dataset.act) {
     move(li.dataset.id, btn.dataset.act);
   } else if (btn.classList.contains('add')) {
@@ -711,6 +734,15 @@ $('#tabs').addEventListener('click', e => {
   state.ui.day = +b.dataset.i; save(); render(); window.scrollTo(0, 0);
 });
 $('#reorderBtn').addEventListener('click', () => { reorder = !reorder; render(); });
+$('#trackAllBtn').addEventListener('click', () => {
+  if (!confirm('¿Empezar el seguimiento de todos los ejercicios desde hoy? No se borra ningún dato; solo se ignoran las sesiones anteriores en el medidor.')) return;
+  setTrack(state.days.flatMap(d => d.exercises.map(e => e.id)), true);
+  render(); toast('Seguimiento reiniciado en todos los ejercicios');
+});
+$('#trackClearBtn').addEventListener('click', () => {
+  setTrack(state.days.flatMap(d => d.exercises.map(e => e.id)), false);
+  render(); toast('Usando todo el histórico');
+});
 $('#progress').addEventListener('toggle', () => { if ($('#progress').open) $('#progList').innerHTML = progressHTML(); });
 
 $('#exportBtn').addEventListener('click', () => {
@@ -778,12 +810,18 @@ function norm(s) {
   Object.keys(s.history).sort().forEach(id => {
     history[id] = s.history[id].slice().sort((a, b) => a.date.localeCompare(b.date));
   });
-  return { days: s.days, meta: { orderT: (s.meta && s.meta.orderT) || 0 }, history };
+  const tr = {}, src = (s.meta && s.meta.track) || {};
+  Object.keys(src).sort().forEach(k => { tr[k] = src[k]; });
+  return { days: s.days, meta: { orderT: (s.meta && s.meta.orderT) || 0, track: tr }, history };
 }
 
 function merge(local, remote) {
   const lt = (local.meta && local.meta.orderT) || 0, rt = (remote.meta && remote.meta.orderT) || 0;
-  const out = { days: rt > lt ? remote.days : local.days, history: {}, ui: local.ui, meta: { orderT: Math.max(lt, rt) } };
+  const out = { days: rt > lt ? remote.days : local.days, history: {}, ui: local.ui, meta: { orderT: Math.max(lt, rt), track: {} } };
+  const ta = (local.meta && local.meta.track) || {}, tb = (remote.meta && remote.meta.track) || {};
+  new Set([...Object.keys(ta), ...Object.keys(tb)]).forEach(k => {   // gana el último cambio de cada ejercicio
+    out.meta.track[k] = ((tb[k] && tb[k].t) || 0) > ((ta[k] && ta[k].t) || 0) ? tb[k] : ta[k];
+  });
   const ids = new Set([...Object.keys(local.history), ...Object.keys(remote.history)]);
   ids.forEach(id => {
     const byDate = {};
