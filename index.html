@@ -48,6 +48,8 @@ h1{margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em}
 .rx{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
 .side{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
 .pill{background:var(--signal);color:var(--signal-ink);font-weight:800;font-size:13px;padding:3px 8px;border-radius:6px;white-space:nowrap}
+.pill.stall{background:var(--ink);color:var(--bg)}
+.meta .up.st{background:var(--ink);color:var(--bg)}
 .prog{color:var(--muted);font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
 .ex.done .prog{color:var(--ink)}
 .ex.done .prog::before{content:"✓ "}
@@ -74,6 +76,17 @@ h1{margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em}
 .set input::placeholder{color:var(--muted);opacity:.55;font-weight:600}
 .set input::-webkit-outer-spin-button,.set input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .add{width:100%;min-height:44px;border:1.5px dashed var(--line);border-radius:8px;background:none;color:var(--muted);font-weight:650;cursor:pointer}
+
+/* Tendencia */
+.trend svg{display:block;width:100%;height:36px;margin:2px 0 8px;color:var(--muted)}
+.hist.trend p{margin:8px 0 0;font-size:14px}
+#progList h3{margin:14px 0 2px;font-size:14px;color:var(--ink)}
+.plist{list-style:none;margin:0;padding:0}
+.plist li{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line)}
+.plist li small{color:var(--muted)}
+.plist b{font-weight:700;white-space:nowrap;color:var(--muted)}
+.plist .st-up,.plist .st-bump{color:var(--ink)}
+.plist .st-stall,.plist .st-down{background:var(--ink);color:var(--bg);padding:1px 7px;border-radius:5px}
 
 /* Reordenar */
 .grip,.tools{display:none}
@@ -110,6 +123,11 @@ summary{cursor:pointer;min-height:36px}
   </div>
   <p class="hint">Arrastra el asa o usa las flechas. El orden se guarda solo.</p>
   <ol id="list"></ol>
+  <details id="progress">
+    <summary>Progreso: ¿estancado o subiendo?</summary>
+    <p class="note">Se compara tu mejor marca estimada (1RM) de las últimas 3 sesiones con la de las anteriores, dentro de una ventana de 6 semanas. Hacen falta al menos 4 sesiones del ejercicio.</p>
+    <div id="progList"></div>
+  </details>
   <details>
     <summary>Sincronización y copia de seguridad</summary>
     <p class="note">Sincroniza tus datos entre móvil y ordenador con un Gist privado de tu cuenta de GitHub. Crea un token clásico en github.com/settings/tokens con solo el permiso <b>gist</b> y pégalo aquí en cada dispositivo.</p>
@@ -143,15 +161,16 @@ const SEED = [
   { name:'Push', ex:[
     ['Ext. horizontal polea','3','10-12','1-0'],
     ['Fondos lastre','2','6-8','1-2',null,['Fondos con lastre','Polea alta (pecho inferior)']],
-    ['Press inclinado multipower','2','6-8','1-2'],
-    ['Press militar','2','6-8','1-2',null,null,{ id:'d2e_pressmilitar' }],
+    ['Press militar','2','6-8','1-2',null,['Militar','Inclinado multipower'],
+      { id:'d2e_pressmilitar', count:true, vrx:[['2','6-8','1-2'],['2','6-8','1-2']] }],
     ['Polea baja arriba','2','10-12','1-0'],
     ['Laterales','3','10-12','1-2',null,['De pie','Sentado con mancuerna','Polea con pulsera']] ]},
   { name:'Pull', ex:[
     ['Jalón pecho','3','6-8','1-2'],
     ['Jalón agarre estrecho','2','6-8','1-2',null,null,{ id:'d3e_jalonestrecho' }],
     ['Remo barra libre','2-3','6-8','1-2',null,['Barra libre','Máquina agarre prono']],
-    ['Pull-over','2','10-12','1-0'], ['Martillo mancuernas','2','8-10','1-2'],
+    ['Pull-over unilateral','2','10-12','1-0',null,null,{ id:'d3e_pulloverunilateral', count:true }],
+    ['Martillo mancuernas','2','8-10','1-2'],
     ['Curl bayesiano','3','8-10','1-0',null,['Polea','Mancuerna']],
     ['Antebrazo','2','12-15','0',['Supino','Prono']] ]},
   { name:'Pierna B', ex:[
@@ -166,8 +185,7 @@ const SEED = [
     ['Curl barra W','3','10-8','1-2'],
     ['Remo','3','8-10','1-2'],
     ['Remo unilateral','2','6-8','1-2',null,['Mancuerna unilateral','Máquina agarre neutro'],
-      { id:'d5e_remounilateral', vrx:[['2','6-8','1-2'],['2','8-10','0-1']] }],
-    ['Press Inclinado Mancuerna','2','8','1-2'] ]}
+      { id:'d5e_remounilateral', vrx:[['2','6-8','1-2'],['2','8-10','0-1']] }] ]}
 ];
 
 const range = s => {
@@ -196,7 +214,9 @@ function buildSeed() {
       id: 'd' + (di + 1),
       name: d.name,
       exercises: d.ex.map(([name, sets, reps, rir, parts, variants, extra]) => {
-        const id = extra && extra.id ? extra.id : `d${di + 1}e${++n}`;
+        const own = extra && extra.id;
+        const k = own && !extra.count ? 0 : ++n; // 'count' = id propio que mantiene su hueco en la numeración
+        const id = own ? extra.id : `d${di + 1}e${k}`;
         return { id, name, ...mkRx(sets, reps, rir),
                  ...(parts ? { parts } : {}), ...(variants ? { variants } : {}),
                  ...(extra && extra.vrx ? { vrx: extra.vrx.map(a => mkRx(...a)) } : {}) };
@@ -230,6 +250,7 @@ function migrate(s) {
     const i = d.exercises.findIndex(e => e.name === afterName);
     d.exercises.splice(i < 0 ? d.exercises.length : i + 1, 0, ex);
   };
+  const mpIds = new Set(['d2e3']);
   s.days.forEach(d => {
     d.exercises.forEach(e => {
       // Limpieza de emergencia por si la versión anterior rompió los datos
@@ -266,9 +287,40 @@ function migrate(s) {
           e.setsMin = 2; e.setsMax = 2;
         }
       });
-      addAfter(d, 'Press inclinado multipower', mkEx('d2e_pressmilitar', 'Press militar', '2', '6-8', '1-2'));
+      addAfter(d, 'Press inclinado multipower', mkEx('d2e_pressmilitar', 'Press militar', '2', '6-8', '1-2', {
+        variants: ['Militar', 'Inclinado multipower'],
+        vrx: [['2', '6-8', '1-2'], ['2', '6-8', '1-2']]
+      }));
+      // Press militar pasa a tener la variante «Inclinado multipower»
+      const pm = d.exercises.find(e => e.name === 'Press militar');
+      if (pm && !pm.variants) {
+        pm.variants = ['Militar', 'Inclinado multipower'];
+        pm.vrx = [mkRx('2', '6-8', '1-2'), mkRx('2', '6-8', '1-2')];
+      } else if (pm && pm.variants && pm.variants[1] === 'Inclinado con mancuerna') {
+        // Versión anterior: la variante era la de mancuerna. Sus marcas se apartan para no mezclarlas.
+        pm.variants[1] = 'Inclinado multipower';
+        pm.vrx = [mkRx('2', '6-8', '1-2'), mkRx('2', '6-8', '1-2')];
+        const h = s.history['d2e_pressmilitar'] || [];
+        const old = h.filter(x => (x.variant || 0) === 1);
+        if (old.length) {
+          const arc = s.history['arch_press_inclinado_mancuerna'] || (s.history['arch_press_inclinado_mancuerna'] = []);
+          old.forEach(x => { if (!arc.some(a => a.date === x.date)) arc.push({ ...x, variant: 0 }); });
+          s.history['d2e_pressmilitar'] = h.filter(x => (x.variant || 0) !== 1);
+        }
+      }
+      // El Press inclinado multipower deja de ser ejercicio propio
+      d.exercises = d.exercises.filter(e => {
+        if (e.name !== 'Press inclinado multipower') return true;
+        mpIds.add(e.id); return false;
+      });
     }
     if (d.name === 'Pull') {
+      // Pull-over → Pull-over unilateral (ejercicio nuevo: empieza sin histórico, el antiguo se conserva aparte)
+      const po = d.exercises.findIndex(e => e.name === 'Pull-over');
+      if (po >= 0) {
+        if (d.exercises.some(e => e.id === 'd3e_pulloverunilateral')) d.exercises.splice(po, 1);
+        else d.exercises[po] = { ...d.exercises[po], id: 'd3e_pulloverunilateral', name: 'Pull-over unilateral' };
+      }
       d.exercises.forEach(e => {
         if (e.name === 'Jalón pecho' && e.repMin === 8 && e.repMax === 8) e.repMin = 6;
       });
@@ -281,6 +333,26 @@ function migrate(s) {
       }));
     }
   });
+
+  // Press inclinado con mancuerna (Torso): se elimina; su histórico queda guardado sin uso.
+  s.days.forEach(d => { d.exercises = d.exercises.filter(e => e.name !== 'Press Inclinado Mancuerna'); });
+
+  // Histórico del Press inclinado multipower → variante 2 de Press militar
+  const inUse = new Set(s.days.flatMap(d => d.exercises.map(e => e.id)));
+  if (inUse.has('d2e_pressmilitar')) {
+    mpIds.forEach(oid => {
+      const src = s.history[oid];
+      if (!src || inUse.has(oid)) return;
+      const dst = s.history['d2e_pressmilitar'] || (s.history['d2e_pressmilitar'] = []);
+      src.forEach(en => {
+        if (en.del) return;
+        const j = dst.findIndex(x => x.date === en.date && (x.variant || 0) === 1);
+        if (j < 0) dst.push({ ...en, variant: 1 });
+        else if ((en.t || 0) > (dst[j].t || 0)) dst[j] = { ...en, variant: 1 };
+      });
+      delete s.history[oid];
+    });
+  }
 
   return s;
 }
@@ -337,6 +409,53 @@ function partsUp(ex0, entry) {
 }
 const shouldIncrease = (ex, entry) => partsUp(ex, entry).length > 0;
 
+/* ---------- Estancamiento ---------- */
+const WIN_DAYS = 42, MIN_SESS = 4, RECENT = 3, TOL = 0.01;
+const daysAgo = n => {
+  const d = new Date(); d.setDate(d.getDate() - n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const curV = e => {
+  const v = e.variants ? (e.id in selVariant ? selVariant[e.id] : lastVariant(e.id)) : 0;
+  return e.variants && v < e.variants.length ? v : 0;
+};
+// 1RM estimado (Epley) sumando el RIR como repeticiones en reserva; sin peso, vale reps + RIR
+const e1rm = (w, r, rir) => (r == null || r <= 0) ? null : (w > 0 ? w * (1 + (r + (rir || 0)) / 30) : r + (rir || 0));
+function sessionScore(ex, entry) {
+  let tot = 0, kg = false;
+  for (let k = 0; k < (ex.parts ? ex.parts.length : 1); k++) {
+    const [wk, rk, ik] = KEYS[k];
+    const vals = completed(entry).map(s => e1rm(s[wk], s[rk], s[ik])).filter(x => x != null);
+    if (vals.length) tot += Math.max(...vals);
+    if (completed(entry).some(s => s[wk] > 0)) kg = true;
+  }
+  return tot > 0 ? { score: tot, kg } : null;
+}
+function trend(base, v) {
+  const ex = eff(base, v), from = daysAgo(WIN_DAYS);
+  const pts = hist(ex.id)
+    .filter(h => !h.del && sameV(h, v) && h.date >= from && completed(h).length >= ex.setsMin)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(h => { const s = sessionScore(ex, h); return s && { date: h.date, score: s.score, kg: s.kg }; })
+    .filter(Boolean);
+  const out = { status: 'few', pts };
+  if (pts.length < MIN_SESS) return out;
+  const early = pts.slice(0, -RECENT).map(p => p.score), late = pts.slice(-RECENT).map(p => p.score);
+  const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+  out.bestEarly = Math.max(...early); out.bestLate = Math.max(...late);
+  out.avgEarly = avg(early); out.avgLate = avg(late);
+  if (out.bestLate > out.bestEarly * (1 + TOL)) out.status = 'up';
+  else if (out.avgLate < out.avgEarly * 0.97) out.status = 'down';
+  else out.status = 'stall';
+  // Si ya toca subir peso, no es un estancamiento: es el momento de subir
+  if (out.status === 'stall' || out.status === 'down') {
+    const p = prevEntry(base.id, v);
+    if (p && shouldIncrease(base, p)) out.status = 'bump';
+  }
+  return out;
+}
+const isStalled = t => t.status === 'stall' || t.status === 'down';
+
 /* ---------- Render ---------- */
 const day = () => state.days[state.ui.day];
 
@@ -351,6 +470,7 @@ function render() {
   list.className = reorder ? 'reorder' : '';
   list.innerHTML = day().exercises.map(card).join('');
   updateMeta();
+  $('#progList').innerHTML = progressHTML();
 }
 
 function setHTML(i, ex, c, p, wDef) {
@@ -381,6 +501,7 @@ function card(base) {
   const doneN = cur ? completed(cur).length : 0;
   const n = Math.max(ex.setsMax, cur ? cur.sets.length : 0);
   const up = prev ? partsUp(ex, prev) : [];
+  const tr = trend(base, safeV);
 
   let rows = '';
   for (let i = 0; i < n; i++) {
@@ -410,7 +531,7 @@ function card(base) {
       <div class="grip" aria-label="Arrastrar para reordenar"><svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor"><circle cx="6" cy="4" r="1.6"/><circle cx="12" cy="4" r="1.6"/><circle cx="6" cy="9" r="1.6"/><circle cx="12" cy="9" r="1.6"/><circle cx="6" cy="14" r="1.6"/><circle cx="12" cy="14" r="1.6"/></svg></div>
       <button class="head" type="button" aria-expanded="false">
         <span class="main"><span class="name">${esc(ex.name)}</span><br><span class="rx">${rx}</span></span>
-        <span class="side">${flag ? '<span class="pill">Subir peso</span>' : ''}<span class="prog">${doneN}/${ex.setsMax}</span></span>
+        <span class="side">${flag ? '<span class="pill">Subir peso</span>' : ''}${isStalled(tr) ? `<span class="pill stall">${tr.status === 'down' ? 'Bajando' : 'Estancado'}</span>` : ''}<span class="prog">${doneN}/${ex.setsMax}</span></span>
       </button>
       <div class="tools">
         <button type="button" data-act="top" aria-label="Mover al inicio">⤒</button>
@@ -421,12 +542,41 @@ function card(base) {
     <div class="panel">
       ${vartabs}
       <div class="hist">${history}</div>
+      ${trendHTML(base, tr)}
       ${flag ? `<p class="bump">Llegaste a ${ex.repMax} reps en todas las series con el RIR objetivo${ex.parts ? ` en ${up.map(k => ex.parts[k].toLowerCase()).join(' y ')}` : ''}. Hoy sube el peso${ex.variants ? ` (${esc(ex.variants[safeV])})` : ''}.</p>` : ''}
       <div class="cols"><span></span><span>Peso (kg)</span><span>Reps</span><span>RIR</span></div>
       ${rows}
       <button class="add" type="button">+ Serie</button>
     </div>
   </li>`;
+}
+
+const r1 = n => fmt(Math.round(n * 10) / 10);
+function spark(pts) {
+  const W = 120, H = 32, vs = pts.map(p => p.score);
+  const lo = Math.min(...vs), span = (Math.max(...vs) - lo) || 1;
+  const xy = pts.map((p, i) => `${(i / (pts.length - 1) * (W - 8) + 4).toFixed(1)},${(H - 4 - (p.score - lo) / span * (H - 8)).toFixed(1)}`);
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${xy.join(' ')}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function trendNote(base, t) {
+  const u = t.pts.some(p => p.kg) ? ' kg' : '';
+  if (t.status === 'few') return `Aún pocos datos: ${t.pts.length} de ${MIN_SESS} sesiones necesarias en las últimas 6 semanas.`;
+  if (t.status === 'up') return `Vas progresando: tu mejor marca estimada pasó de ${r1(t.bestEarly)}${u} a ${r1(t.bestLate)}${u}.`;
+  if (t.status === 'bump') return 'Ya toca subir peso: sube y vuelve a medir.';
+  const alt = base.variants ? 'prueba la otra variante o cambia de ejercicio' : 'valora cambiar de ejercicio';
+  if (t.status === 'down') return `Rindes por debajo de tus sesiones anteriores (${r1(t.avgEarly)}${u} → ${r1(t.avgLate)}${u} de media). Revisa sueño y comida, haz una semana de descarga o ${alt}.`;
+  return `Sin récord en las últimas ${RECENT} sesiones (tu mejor marca estimada sigue en ${r1(t.bestEarly)}${u}). Antes de cambiar, revisa sueño y comida; si todo está bien, ${alt}. Si venías de una descarga, ignora este aviso.`;
+}
+function trendHTML(base, t) {
+  const chips = t.pts.map(p => `<li>${fmtDate(p.date)}<span>${r1(p.score)}${p.kg ? ' kg' : ''}</span></li>`).join('');
+  return `<div class="hist trend"><h2>Tendencia · últimas 6 semanas (1RM estimado)</h2>${t.pts.length > 1 ? spark(t.pts) : ''}${chips ? `<ul>${chips}</ul>` : ''}<p>${esc(trendNote(base, t))}</p></div>`;
+}
+function progressHTML() {
+  const label = { up:'Progresando', bump:'Toca subir peso', stall:'Estancado', down:'Bajando', few:'Pocos datos' };
+  return state.days.map(d => `<h3>${esc(d.name)}</h3><ul class="plist">` + d.exercises.map(e => {
+    const v = curV(e), t = trend(e, v);
+    return `<li><span>${esc(e.name)}${e.variants ? ` <small>· ${esc(e.variants[v])}</small>` : ''}</span><b class="st-${t.status}">${label[t.status]}</b></li>`;
+  }).join('') + '</ul>').join('');
 }
 
 function updateMeta() {
@@ -437,8 +587,10 @@ function updateMeta() {
   };
   const done = exs.filter(e => { const c = todayEntry(e.id, vOf(e)); return c && completed(c).length >= eff(e, vOf(e)).setsMin; }).length;
   const flags = exs.filter(e => { const p = prevEntry(e.id, vOf(e)); return p && shouldIncrease(e, p); }).length;
+  const stalls = exs.filter(e => isStalled(trend(e, vOf(e)))).length;
   $('#dayMeta').innerHTML = `${done} de ${exs.length} hechos hoy` +
-    (flags ? `<span class="up">${flags} para subir peso</span>` : '');
+    (flags ? `<span class="up">${flags} para subir peso</span>` : '') +
+    (stalls ? `<span class="up st">${stalls} estancado${stalls > 1 ? 's' : ''}</span>` : '');
 }
 
 /* ---------- Registro automático ---------- */
@@ -559,6 +711,7 @@ $('#tabs').addEventListener('click', e => {
   state.ui.day = +b.dataset.i; save(); render(); window.scrollTo(0, 0);
 });
 $('#reorderBtn').addEventListener('click', () => { reorder = !reorder; render(); });
+$('#progress').addEventListener('toggle', () => { if ($('#progress').open) $('#progList').innerHTML = progressHTML(); });
 
 $('#exportBtn').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type:'application/json' });
